@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ES5 Slideshow</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+
+  <!-- Config Form -->
+  <div id="config-container">
+    <h2>Immich Configuration</h2>
+    <input type="text" id="server-url" placeholder="Server URL (e.g. http://192.168.1.10:2283)">
+    <input type="password" id="api-key" placeholder="API Key">
+    <button id="save-config-btn">Start Slideshow</button>
+  </div>
+
+  <!-- Slideshow -->
+  <div id="slideshow-container" style="display:none;">
+    <img src="" id="slideshow-image">
+    <video id="slideshow-video" style="display:none; max-width: 100%; max-height: 100%;" autoplay muted playsinline></video>
+    <div id="slideshow-controls">
+      <button id="prev-btn">Previous</button>
+      <button id="play-pause-btn">Pause</button>
+      <button id="next-btn">Next</button>
+      <button id="settings-btn" style="float:right;">Settings</button>
+    </div>
+    <div id="loading-indicator" style="display:none;">Loading assets...</div>
+    <div id="error-message" style="display:none; color: red;"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
