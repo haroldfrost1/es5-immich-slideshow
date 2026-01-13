@@ -1,4 +1,4 @@
-var CACHE_NAME = 'immich-slideshow-v1';
+var CACHE_NAME = 'immich-slideshow-v2';
 var urlsToCache = [
   './',
   './index.html',
