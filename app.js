@@ -57,12 +57,28 @@
   var errorMessage = document.getElementById('error-message');
 
   // --- State ---
-  var images = []; // Array of { id: string, type: 'IMAGE' | 'VIDEO' }
+  var images = []; // Array of { id: string, type: 'IMAGE' | 'VIDEO', duration: number }
   var currentIndex = 0;
   var isPlaying = true;
   var slideTimeout = null;
   var slideDuration = 5000; // 5 seconds for images
   var currentBlobUrl = null;
+
+  // --- Helpers ---
+  function parseDuration(durationStr) {
+    if (!durationStr) return 0;
+    // Format usually HH:MM:SS.mmmm or just seconds
+    var parts = durationStr.split(':');
+    var seconds = 0;
+    if (parts.length === 3) {
+      seconds = (+parts[0]) * 60 * 60 + (+parts[1]) * 60 + (+parts[2]);
+    } else if (parts.length === 2) {
+      seconds = (+parts[0]) * 60 + (+parts[1]);
+    } else {
+      seconds = +durationStr;
+    }
+    return Math.ceil(seconds * 1000);
+  }
 
   // --- Initialization ---
   function init() {
@@ -90,7 +106,7 @@
   // --- Logic ---
 
   function fetchAssets() {
-    // Show loading if starting fresh
+    // Only show loading if we are starting fresh (empty list)
     if (images.length === 0) {
         loadingIndicator.style.display = 'block';
         clearMedia();
@@ -126,7 +142,8 @@
           var newImages = assets.map(function(asset) {
             return {
               id: asset.id,
-              type: asset.type // 'IMAGE' or 'VIDEO'
+              type: asset.type, // 'IMAGE' or 'VIDEO'
+              duration: parseDuration(asset.duration)
             };
           });
 
@@ -153,14 +170,25 @@
       showError('Network error occurred.');
     };
 
-    // Request 100 random assets
-    xhr.send(JSON.stringify({ size: 100 }));
+    // Request 100 random assets with people data
+    xhr.send(JSON.stringify({ size: 100, withPeople: true }));
   }
 
   function showError(msg) {
     errorMessage.textContent = msg;
     errorMessage.style.display = 'block';
   }
+
+  slideshowImage.onload = function() {
+      console.log('Image element loaded successfully: ' + slideshowImage.src);
+      errorMessage.style.display = 'none'; // Clear errors on success
+  };
+
+  slideshowImage.onerror = function() {
+      var msg = 'Error loading image (onerror): ' + slideshowImage.src;
+      console.error(msg);
+      showError(msg);
+  };
 
   // --- Media Display Logic ---
 
@@ -183,7 +211,7 @@
       URL.revokeObjectURL(currentBlobUrl);
       currentBlobUrl = null;
     }
-    slideshowImage.src = '';
+    slideshowImage.removeAttribute('src');
   }
 
   function showImage(index) {
@@ -218,14 +246,16 @@
   }
 
   function playVideo(asset) {
-    console.log('Playing Video: ' + asset.id);
+    console.log('Playing Video: ' + asset.id + ' (Duration: ' + asset.duration + 'ms)');
     slideshowVideo.style.display = 'block';
     
     var url = config.serverUrl.replace(/\/$/, '') + '/api/assets/' + asset.id + '/video/playback?apiKey=' + config.apiKey;
     
     slideshowVideo.src = url;
     
+    // Auto-advance when ended
     slideshowVideo.onended = function() {
+        console.log('Video ended normally.');
         if (isPlaying) {
             nextImage();
         }
@@ -233,10 +263,24 @@
 
     slideshowVideo.onerror = function() {
         console.error('Error playing video: ' + asset.id);
+        // If error, wait a moment then skip
         if (isPlaying) {
+            // Ensure we don't have double nextImage calls if safety timeout also fires
+            if (slideTimeout) clearTimeout(slideTimeout);
             slideTimeout = setTimeout(nextImage, 2000);
         }
     };
+
+    // Safety Timeout: Duration + Margin
+    if (isPlaying) {
+        // Use parsed duration + 5s margin, or default 30s if duration missing
+        var safetyTime = (asset.duration > 0 ? asset.duration : 30000) + 5000;
+        console.log('Setting safety timeout for video: ' + safetyTime + 'ms');
+        slideTimeout = setTimeout(function() {
+            console.warn('Video safety timeout reached. Skipping...');
+            nextImage();
+        }, safetyTime);
+    }
 
     var playPromise = slideshowVideo.play();
     if (playPromise !== undefined) {
@@ -248,7 +292,7 @@
 
   function displayImage(asset) {
     console.log('Displaying Image: ' + asset.id);
-    slideshowImage.style.display = 'block'; 
+    slideshowImage.style.display = 'block'; // Make sure it's visible
 
     var url = config.serverUrl.replace(/\/$/, '') + '/api/assets/' + asset.id + '/thumbnail?size=preview';
 
@@ -264,11 +308,13 @@
         currentBlobUrl = URL.createObjectURL(blob);
         slideshowImage.src = currentBlobUrl;
         
+        // Start timer only after successful load
         if (isPlaying) {
             slideTimeout = setTimeout(nextImage, slideDuration);
         }
       } else {
         console.error('Failed to load image. Status: ' + xhr.status);
+        // Skip on error
         if (isPlaying) {
             slideTimeout = setTimeout(nextImage, 1000); 
         }
@@ -294,10 +340,24 @@
   }
 
   function startSlideshow() {
-    if (intervalId) clearInterval(intervalId); // Clear any old intervals
+    if (intervalId) clearInterval(intervalId); // Clear old intervals (not used anymore)
     playPauseBtn.textContent = 'Pause';
     isPlaying = true;
-    // Don't call nextImage here to avoid double-skip if already playing
+    
+    // Resume current item processing
+    var asset = images[currentIndex];
+    if (asset && asset.type === 'VIDEO') {
+        slideshowVideo.play();
+        // Re-set safety timeout logic if needed, but playVideo handles initial call. 
+        // If resuming a paused video, onended/timeout are already set/cleared.
+        // Complex to handle perfectly without fuller state machine, 
+        // but hitting Play will unpause HTML5 video element.
+        // We might need to re-set the safety timeout if it was cleared on stop.
+        // For simplicity: just let play() handle it, if it stalls, user hits next.
+    } else {
+        // If image, just go next to restart flow
+        nextImage();
+    }
   }
 
   function stopSlideshow() {
@@ -311,15 +371,7 @@
     if (isPlaying) {
       stopSlideshow();
     } else {
-      isPlaying = true;
-      playPauseBtn.textContent = 'Pause';
-      
-      var asset = images[currentIndex];
-      if (asset && asset.type === 'VIDEO') {
-          slideshowVideo.play();
-      } else {
-          nextImage();
-      }
+      startSlideshow(); // This now just sets isPlaying and resumes or skips
     }
   }
 
@@ -334,6 +386,7 @@
       return;
     }
 
+    // Basic URL validation/correction
     if (url.indexOf('http') !== 0) {
         url = 'http://' + url;
     }
@@ -348,12 +401,12 @@
   });
 
   prevBtn.addEventListener('click', function() {
-    stopSlideshow(); 
+    stopSlideshow(); // Stop auto-play on manual interaction
     prevImage();
   });
 
   nextBtn.addEventListener('click', function() {
-    stopSlideshow(); 
+    stopSlideshow(); // Stop auto-play on manual interaction
     nextImage();
   });
 
