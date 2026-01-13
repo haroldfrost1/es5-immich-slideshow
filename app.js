@@ -61,7 +61,7 @@
   var currentIndex = 0;
   var isPlaying = true;
   var slideTimeout = null;
-  var slideDuration = 5000; // 5 seconds for images
+  var slideDuration = 12000; // 5 seconds for images
   var currentBlobUrl = null;
 
   // --- Helpers ---
