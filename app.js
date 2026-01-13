@@ -90,13 +90,18 @@
   // --- Logic ---
 
   function fetchAssets() {
-    loadingIndicator.style.display = 'block';
+    // Show loading if starting fresh
+    if (images.length === 0) {
+        loadingIndicator.style.display = 'block';
+        clearMedia();
+    }
+    
     errorMessage.style.display = 'none';
     errorMessage.textContent = '';
-    images = [];
 
     var xhr = new XMLHttpRequest();
-    var url = config.serverUrl.replace(/\/$/, '') + '/api/search/metadata'; 
+    // Use Random Search Endpoint
+    var url = config.serverUrl.replace(/\/$/, '') + '/api/search/random'; 
     
     xhr.open('POST', url, true);
     xhr.setRequestHeader('x-api-key', config.apiKey);
@@ -108,26 +113,32 @@
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           var response = JSON.parse(xhr.responseText);
-          var assets = (response.assets && response.assets.items) || [];
+          // Random endpoint returns an Array directly
+          var assets = Array.isArray(response) ? response : [];
           
-          console.log('Found ' + assets.length + ' assets.');
+          console.log('Found ' + assets.length + ' random assets.');
 
           if (assets.length === 0) {
              showError('No assets found.');
              return;
           }
 
-          images = assets.map(function(asset) {
+          var newImages = assets.map(function(asset) {
             return {
               id: asset.id,
               type: asset.type // 'IMAGE' or 'VIDEO'
             };
           });
 
+          // Replace list with new random batch
+          images = newImages;
           currentIndex = 0;
-          isPlaying = true;
-          playPauseBtn.textContent = 'Pause';
-          showImage(currentIndex);
+          
+          // If we were playing (or just starting), show the first image of the new batch
+          if (isPlaying) {
+             showImage(currentIndex);
+             playPauseBtn.textContent = 'Pause';
+          }
 
         } catch (e) {
           showError('Failed to parse response: ' + e.message);
@@ -142,7 +153,8 @@
       showError('Network error occurred.');
     };
 
-    xhr.send(JSON.stringify({ size: 100, order: 'desc' }));
+    // Request 100 random assets
+    xhr.send(JSON.stringify({ size: 100 }));
   }
 
   function showError(msg) {
@@ -175,11 +187,24 @@
   }
 
   function showImage(index) {
-    if (images.length === 0) return;
+    // Check for end of list -> Refetch
+    if (index >= images.length) {
+        if (images.length > 0) {
+            console.log('End of list reached. Refetching random assets...');
+            images = []; 
+            fetchAssets();
+            return;
+        } else {
+            return; 
+        }
+    }
     
-    // Wrap around
-    if (index >= images.length) index = 0;
-    if (index < 0) index = images.length - 1;
+    // Loop back if manually going previous from 0
+    if (index < 0) {
+        if (images.length > 0) index = images.length - 1;
+        else return;
+    }
+
     currentIndex = index;
 
     var asset = images[currentIndex];
@@ -200,7 +225,6 @@
     
     slideshowVideo.src = url;
     
-    // Auto-advance when ended
     slideshowVideo.onended = function() {
         if (isPlaying) {
             nextImage();
@@ -209,7 +233,6 @@
 
     slideshowVideo.onerror = function() {
         console.error('Error playing video: ' + asset.id);
-        // If error, wait a moment then skip
         if (isPlaying) {
             slideTimeout = setTimeout(nextImage, 2000);
         }
@@ -219,15 +242,13 @@
     if (playPromise !== undefined) {
         playPromise.catch(function(error) {
             console.warn('Auto-play prevented:', error);
-            // If autoplay blocked, maybe show play button? For now just try to skip.
-            // Or typically user interaction has already happened so it should work.
         });
     }
   }
 
   function displayImage(asset) {
     console.log('Displaying Image: ' + asset.id);
-    slideshowImage.style.display = 'block'; // Make sure it's visible
+    slideshowImage.style.display = 'block'; 
 
     var url = config.serverUrl.replace(/\/$/, '') + '/api/assets/' + asset.id + '/thumbnail?size=preview';
 
@@ -243,13 +264,11 @@
         currentBlobUrl = URL.createObjectURL(blob);
         slideshowImage.src = currentBlobUrl;
         
-        // Start timer only after successful load
         if (isPlaying) {
             slideTimeout = setTimeout(nextImage, slideDuration);
         }
       } else {
         console.error('Failed to load image. Status: ' + xhr.status);
-        // Skip on error
         if (isPlaying) {
             slideTimeout = setTimeout(nextImage, 1000); 
         }
@@ -274,6 +293,13 @@
     showImage(currentIndex - 1);
   }
 
+  function startSlideshow() {
+    if (intervalId) clearInterval(intervalId); // Clear any old intervals
+    playPauseBtn.textContent = 'Pause';
+    isPlaying = true;
+    // Don't call nextImage here to avoid double-skip if already playing
+  }
+
   function stopSlideshow() {
     isPlaying = false;
     playPauseBtn.textContent = 'Play';
@@ -288,13 +314,10 @@
       isPlaying = true;
       playPauseBtn.textContent = 'Pause';
       
-      // Resume logic
       var asset = images[currentIndex];
-      if (asset.type === 'VIDEO') {
+      if (asset && asset.type === 'VIDEO') {
           slideshowVideo.play();
       } else {
-          // If was waiting on image timer, restart it immediately or go next?
-          // Simplest is to go to next immediately to feel responsive
           nextImage();
       }
     }
@@ -311,7 +334,6 @@
       return;
     }
 
-    // Basic URL validation/correction
     if (url.indexOf('http') !== 0) {
         url = 'http://' + url;
     }
@@ -326,12 +348,12 @@
   });
 
   prevBtn.addEventListener('click', function() {
-    stopSlideshow(); // Stop auto-play on manual interaction
+    stopSlideshow(); 
     prevImage();
   });
 
   nextBtn.addEventListener('click', function() {
-    stopSlideshow(); // Stop auto-play on manual interaction
+    stopSlideshow(); 
     nextImage();
   });
 
